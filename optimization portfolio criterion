@@ -1,0 +1,80 @@
+import nasdaqdatalink as ndl
+
+%matplotlib inline
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy import stats
+import openpyxl as xl
+from pandas import DataFrame
+import pandas as pd
+from scipy.optimize import minimize
+plt.style.use('seaborn')
+import warnings
+warnings.filterwarnings("ignore")
+
+
+
+ndl.ApiConfig.api_key = 'my API'
+df= ndl.get_table('QUOTEMEDIA/PRICES', qopts= {'columns':['ticker' , 'date', 'adj_close']}, ticker=['FB', 'AAPL', 'MSFT'], paginate=True, date={'gte':'2000-01-01','lte':'2022-03-15'})
+
+
+# Ordenar las filas por fecha, de más antigua a más reciente y cambiar los indices
+df = df.sort_values(by='date', ignore_index=True)
+df_close = df['adj_close']
+
+data = df_close.dropna().pct_change(1).dropna()
+
+def MV_criterion(weights, data):
+    """
+    -----------------------------------------------------------------------------
+    | Output: optimization porfolio criterion                                   |
+    -----------------------------------------------------------------------------
+    | Inputs: -weight (type ndarray numpy): Wheight for portfolio               |
+    |         -data (type ndarray numpy): Returns of stocks                     |
+    -----------------------------------------------------------------------------
+    """
+
+    # Parameters
+    Lambda = 3
+    W = 1
+    Wbar = 1 + 0.25 / 100
+
+    # Compute portfolio returns
+    portfolio_return = np.multiply(data, np.transpose(weights))
+    portfolio_return = portfolio_return.sum(axis=1)
+
+    # Compute mean and volatility of the portfolio
+    mean = np.mean(portfolio_return, axis=0)
+    std = np.std(portfolio_return, axis=0)
+
+    # Compute the criterion
+    criterion = Wbar ** (1 - Lambda) / (1 + Lambda) + Wbar ** (-Lambda) \
+                * W * mean - Lambda / 2 * Wbar ** (-1 - Lambda) * W ** 2 * std ** 2
+    criterion = -criterion
+    
+    return criterion
+
+# Define train and test sets
+split = int(0.7 * len(data))
+train_set = data.iloc[:split, :]
+test_set = data.iloc[split:, :]
+
+# Find the number of asset
+n = data.shape[1]
+
+# Initialisation weight value
+x0 = np.ones(n)
+
+# Optimization constraints problem
+cons = ({'type': 'eq', 'fun': lambda x: sum(abs(x)) - 1})
+
+# Set the bounds
+Bounds = [(0, 1) for i in range(0, n)]
+
+# Optimization problem solving
+res_MV = minimize(MV_criterion, x0, method="SLSQP",
+                  args=(train_set), bounds=Bounds,
+                  constraints=cons, options={'disp': True})
+
+# Result for computations
+X_MV = res_MV.x
